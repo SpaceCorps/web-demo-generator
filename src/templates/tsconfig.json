@@ -1,0 +1,30 @@
+{
+  // Templates are browser assets that Vite transforms when the harness starts; they are never part
+  // of the dist/ library build. Their imports resolve through the harness Vite alias, which points
+  // at a components-storybook checkout, so this project only type-checks when that checkout exists.
+  // Run it with `npm run lint:templates` — `npm run lint` deliberately excludes it.
+  //
+  // `paths` mirrors the harness's last-resort lookup: the sibling checkout next to this repo. tsc
+  // cannot read COMPONENTS_STORYBOOK_PATH, so a checkout elsewhere needs a tsconfig of its own that
+  // extends this one and overrides `paths`.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@spacecorps/components-storybook": [
+        "../../../components-storybook/dist/index.d.mts"
+      ],
+      "@spacecorps/components-storybook/tendril": [
+        "../../../components-storybook/dist/tendril.d.mts"
+      ]
+    }
+  },
+  // The templates import fixtures from ../fixtures, so the project spans src/.
+  "include": ["**/*", "../fixtures/**/*"],
+  "exclude": []
+}
