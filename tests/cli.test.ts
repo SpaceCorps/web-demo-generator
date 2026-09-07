@@ -70,6 +70,34 @@ describe('CLI argument parser', () => {
     expect(opts.json).toBe(true);
     expect(opts.help).toBe(true);
   });
+
+  it('parses --headed flag with default false', () => {
+    const defaultOpts = parseCliArgs(['-p', 'test']);
+    expect(defaultOpts.headed).toBe(false);
+
+    const headedOpts = parseCliArgs(['-p', 'test', '--headed']);
+    expect(headedOpts.headed).toBe(true);
+  });
+
+  it('parses --browser and -b option with defaults and normalization', () => {
+    const defaultOpts = parseCliArgs(['-p', 'test']);
+    expect(defaultOpts.browser).toBe('chromium');
+
+    const firefoxOpts = parseCliArgs(['-p', 'test', '--browser', 'firefox']);
+    expect(firefoxOpts.browser).toBe('firefox');
+
+    const webkitOpts = parseCliArgs(['-p', 'test', '-b', 'webkit']);
+    expect(webkitOpts.browser).toBe('webkit');
+
+    const chromeNormalized = parseCliArgs(['-p', 'test', '--browser', 'chrome']);
+    expect(chromeNormalized.browser).toBe('chromium');
+
+    const caseNormalized = parseCliArgs(['-p', 'test', '--browser', 'FIREFOX']);
+    expect(caseNormalized.browser).toBe('firefox');
+
+    const unknownNormalized = parseCliArgs(['-p', 'test', '--browser', 'unknown-engine']);
+    expect(unknownNormalized.browser).toBe('chromium');
+  });
 });
 
 describe('CLI runner execution', () => {
@@ -82,6 +110,32 @@ describe('CLI runner execution', () => {
     expect(exitCode).toBe(0);
     expect(stdoutCalls.join('')).toContain('Usage:');
     expect(stdoutCalls.join('')).toContain('--prompt');
+    expect(stdoutCalls.join('')).toContain('--headed');
+    expect(stdoutCalls.join('')).toContain('--browser');
+  });
+
+  it('passes headless: false and browser engine to createGenerator when --headed and --browser are supplied', async () => {
+    const createGeneratorSpy = vi.fn().mockReturnValue({
+      generateDemo: vi.fn().mockResolvedValue({
+        videoPath: 'output/demo.webm',
+        durationMs: 3000,
+        steps: ['Step 1'],
+        status: 'completed',
+        mimeType: 'video/webm',
+      }),
+    });
+
+    const exitCode = await runCli(['-p', 'Test UI change', '--headed', '--browser', 'firefox'], {
+      createGenerator: createGeneratorSpy,
+      stdout: () => {},
+      stderr: () => {},
+    });
+
+    expect(exitCode).toBe(0);
+    expect(createGeneratorSpy).toHaveBeenCalledWith({
+      headless: false,
+      browser: 'firefox',
+    });
   });
 
   it('returns exit code 1 and writes clear error message to stderr when prompt is missing', async () => {
