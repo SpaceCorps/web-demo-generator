@@ -111,7 +111,7 @@ cd ../components-storybook && pnpm install && pnpm build   # produces dist/tendr
 
 The harness looks for that checkout in this order: the `componentsPath` option, then `$COMPONENTS_STORYBOOK_PATH`, then the sibling directory `../components-storybook`. If it finds no build output it fails with the missing filename. Tests that need real components skip themselves when it is absent, so `npm test` passes either way — set `COMPONENTS_STORYBOOK_PATH` to actually exercise them.
 
-Templates live in `src/templates/` and ship as **source**: Vite transforms them at harness startup, so `tsc` excludes them (their imports only resolve through the harness alias). Type-check them separately with `npm run lint:templates`, which needs the components checkout.
+Templates live in `src/templates/` and ship as **source**: Vite transforms them at harness startup, so `tsc` excludes them (their imports only resolve through the harness alias). Type-check them separately with `npm run lint:templates`. `tsc` cannot read `COMPONENTS_STORYBOOK_PATH`, so that project resolves the components types through `paths` pointing at the sibling `../components-storybook` checkout; for a checkout elsewhere, extend `src/templates/tsconfig.json` and override `paths`.
 
 ---
 
@@ -136,7 +136,7 @@ Install ffmpeg with `brew install ffmpeg` (macOS), `apt install ffmpeg` (Debian/
 - `npm run build` - Build the TypeScript source code
 - `npm run dev` - Run TypeScript compiler in watch mode
 - `npm run lint` - Type-check the project
-- `npm run lint:templates` - Type-check `src/templates/` (requires the components checkout)
+- `npm run lint:templates` - Type-check `src/templates/` (requires the sibling components checkout)
 - `npm run test` - Run tests with Vitest
 
 ---
