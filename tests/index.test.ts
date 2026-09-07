@@ -68,4 +68,30 @@ describe('WebDemoGenerator', () => {
     startSpy.mockRestore();
     stopSpy.mockRestore();
   });
+
+  it('generateDemo coordinates prompting and recording returning structured result', async () => {
+    const generator = new WebDemoGenerator();
+    vi.spyOn((generator as any).prompting, 'generateMimicPage').mockResolvedValue({
+      html: '<html><body>Mock demo</body></html>',
+      steps: ['Step 1: Init', 'Step 2: Action'],
+      suggestedDurationMs: 4000,
+    });
+    vi.spyOn((generator as any).recorder, 'recordHtml').mockResolvedValue('/tmp/output/demo.webm');
+
+    const result = await generator.generateDemo({
+      changeDescription: 'Add user avatar',
+      width: 1920,
+      height: 1080,
+      deviceScaleFactor: 2,
+    });
+
+    expect(result).toEqual({
+      videoPath: '/tmp/output/demo.webm',
+      steps: ['Step 1: Init', 'Step 2: Action'],
+      durationMs: 4000,
+      status: 'completed',
+      mimeType: 'video/webm',
+    });
+  });
 });
+

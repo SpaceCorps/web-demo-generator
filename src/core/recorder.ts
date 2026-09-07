@@ -2,7 +2,10 @@ import { chromium, type Browser, type Page } from 'playwright';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { RecordingOptions, TranscodeMode } from '../types.js';
-import { findFfmpeg, shouldTranscode, transcodeToH264 } from './transcode.js';
+import { findFfmpeg, ffmpegInstallHint, shouldTranscode, transcodeToH264 } from './transcode.js';
+
+/** Flag the synthetic page sets on `window` when demo animation completes. */
+export const DEMO_COMPLETE_FLAG = '__DEMO_COMPLETE__';
 
 /** Flag the harness sets on `window` after its first paint. */
 export const HARNESS_READY_FLAG = '__HARNESS_READY__';
@@ -63,8 +66,25 @@ export async function finalizeRecording(
 ): Promise<string> {
   const mode = resolveTranscodeMode(options);
   const target = path.resolve(options.outputPath);
+  const findFfmpegFn =
+    deps.findFfmpeg ?? (deps.transcodeToH264 ? async () => 'injected-transcoder' : findFfmpeg);
 
   if (shouldTranscode(target, mode)) {
+    if (mode === 'auto') {
+      const ffmpegPath = await findFfmpegFn();
+      if (!ffmpegPath) {
+        console.warn(
+          `ffmpeg is not installed on PATH. Falling back to native WebM recording. Install ffmpeg with \`${ffmpegInstallHint()}\` to enable MP4 transcoding.`
+        );
+        const webmTarget = path.join(
+          path.dirname(target),
+          `${path.basename(target, path.extname(target))}.webm`
+        );
+        moveFile(recordedPath, webmTarget);
+        return webmTarget;
+      }
+    }
+
     const transcode = deps.transcodeToH264 ?? transcodeToH264;
     let finalPath: string;
     try {
@@ -84,7 +104,7 @@ export async function finalizeRecording(
     return target;
   }
 
-  // Not transcoding, so the payload stays WebM — and so must the extension.
+  // Not transcoding, so the payload stays WebM, and so must the extension.
   const webmTarget = path.join(
     path.dirname(target),
     `${path.basename(target, path.extname(target))}.webm`
@@ -109,12 +129,24 @@ export class BrowserRecorder {
    */
   async recordHtml(html: string, options: RecordingOptions): Promise<string> {
     return this.record(options, async (page) => {
-      await page.setContent(html, { waitUntil: 'networkidle' });
+      await page.setContent(html, { waitUntil: 'domcontentloaded' });
+      const timeout = options.durationMs ?? 10000;
+      try {
+        await page.waitForFunction(
+          (flag: string) => (window as unknown as Record<string, unknown>)[flag] === true,
+          DEMO_COMPLETE_FLAG,
+          { timeout }
+        );
+        return { earlyComplete: true };
+      } catch {
+        // Completion signal timed out or was not set; proceed to finalize recording with captured frames.
+        return { earlyComplete: false };
+      }
     });
   }
 
   /**
-   * Records a URL — typically a `ComponentHarness` page — replaying scripted interactions.
+   * Records a URL (typically a ComponentHarness page) replaying scripted interactions.
    *
    * Waits for `window.__HARNESS_READY__` rather than network idle: a dashboard with running
    * spinners never reaches network idle.
@@ -137,10 +169,11 @@ export class BrowserRecorder {
    */
   private async record(
     options: RecordingOptions,
-    drive: (page: Page) => Promise<void>
+    drive: (page: Page) => Promise<{ earlyComplete?: boolean } | void>
   ): Promise<string> {
     const width = options.width ?? 1280;
     const height = options.height ?? 720;
+    const deviceScaleFactor = options.deviceScaleFactor ?? 2;
     const durationMs = options.durationMs ?? 5000;
 
     const outputDir = path.dirname(path.resolve(options.outputPath));
@@ -152,6 +185,7 @@ export class BrowserRecorder {
     try {
       const context = await browser.newContext({
         viewport: { width, height },
+        deviceScaleFactor,
         recordVideo: {
           dir: outputDir,
           size: { width, height },
@@ -160,12 +194,17 @@ export class BrowserRecorder {
 
       const page: Page = await context.newPage();
       const startedAt = Date.now();
-      await drive(page);
+      const driveResult = await drive(page);
 
-      // Hold the shot for whatever is left of the requested duration.
-      const remainingMs = durationMs - (Date.now() - startedAt);
-      if (remainingMs > 0) {
-        await page.waitForTimeout(remainingMs);
+      if (driveResult && typeof driveResult === 'object' && driveResult.earlyComplete) {
+        // Small buffer to allow final frames to be captured by Playwright
+        await page.waitForTimeout(200);
+      } else {
+        // Hold the shot for whatever is left of the requested duration.
+        const remainingMs = durationMs - (Date.now() - startedAt);
+        if (remainingMs > 0) {
+          await page.waitForTimeout(remainingMs);
+        }
       }
 
       // Close page and context to finalize the video recording

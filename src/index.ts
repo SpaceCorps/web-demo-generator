@@ -10,12 +10,19 @@ export {
   BrowserRecorder,
   TENDRIL_DASHBOARD_SCRIPT,
   HARNESS_READY_FLAG,
+  DEMO_COMPLETE_FLAG,
   finalizeRecording,
   resolveTranscodeMode,
   type DemoInteraction,
   type UrlRecordingOptions,
   type RecorderDeps,
 } from './core/recorder.js';
+export {
+  parseCliArgs,
+  runCli,
+  type CliOptions,
+  type CliDeps,
+} from './core/cli.js';
 export {
   ComponentHarness,
   resolveComponentsPath,
@@ -72,26 +79,39 @@ export class WebDemoGenerator {
    * Generates an animated mimic page using Claude and records it as a video.
    * Ideal for release patchnotes, changelog showcases, and automated PR demos.
    */
-  async generateDemo(options: DemoPromptOptions): Promise<{ videoPath: string; steps: string[] }> {
+  async generateDemo(options: DemoPromptOptions): Promise<import('./types.js').DemoGenerationResult> {
     const mimicResult = await this.prompting.generateMimicPage(options);
     const durationMs = options.durationSeconds
       ? options.durationSeconds * 1000
       : mimicResult.suggestedDurationMs;
-    const outputPath = options.outputPath ?? path.join('output', 'demo.webm');
+
+    const defaultFilename =
+      options.format === 'mp4' || options.outputPath?.endsWith('.mp4') ? 'demo.mp4' : 'demo.webm';
+    const outputPath = options.outputPath ?? path.join('output', defaultFilename);
 
     const videoPath = await this.recorder.recordHtml(mimicResult.html, {
       durationMs,
       outputPath,
+      width: options.width,
+      height: options.height,
+      deviceScaleFactor: options.deviceScaleFactor,
+      transcode: options.transcode,
     });
+
+    const isMp4 = videoPath.toLowerCase().endsWith('.mp4');
+    const mimeType: 'video/webm' | 'video/mp4' = isMp4 ? 'video/mp4' : 'video/webm';
 
     return {
       videoPath,
       steps: mimicResult.steps,
+      durationMs,
+      status: 'completed',
+      mimeType,
     };
   }
 
   /**
-   * Records a real component template through the harness — authentic markup, stylesheet and theme
+   * Records a real component template through the harness: authentic markup, stylesheet and theme
    * tokens instead of a page Claude guessed. The harness is always stopped, so a failed recording
    * never leaves a Vite server listening.
    */
