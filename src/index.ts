@@ -13,6 +13,8 @@ export {
   DEMO_COMPLETE_FLAG,
   finalizeRecording,
   resolveTranscodeMode,
+  playwrightInstallHint,
+  isMissingBrowserError,
   type DemoInteraction,
   type UrlRecordingOptions,
   type RecorderDeps,

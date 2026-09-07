@@ -39,6 +39,26 @@ export function resolveTranscodeMode(options: RecordingOptions): TranscodeMode {
   return 'auto';
 }
 
+/** Install command for a single Playwright engine, used in the "missing browser" error message. */
+export function playwrightInstallHint(engine: BrowserEngine): string {
+  return `npx playwright install ${engine}`;
+}
+
+/**
+ * True when a launch failure is a missing browser download rather than a real launch failure.
+ *
+ * Playwright has no typed error for this, so this matches the stable parts of its message: the
+ * "Executable doesn't exist" prefix, the `ms-playwright` cache path, and the remedy it prints.
+ */
+export function isMissingBrowserError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /executable doesn'?t exist/i.test(message) ||
+    /ms-playwright/i.test(message) ||
+    /playwright install/i.test(message)
+  );
+}
+
 function moveFile(from: string, to: string): void {
   fs.mkdirSync(path.dirname(to), { recursive: true });
   if (fs.existsSync(to)) fs.unlinkSync(to);
@@ -220,7 +240,18 @@ export class BrowserRecorder {
         : this.browserEngine === 'webkit'
         ? webkit
         : chromium;
-    const browser: Browser = await launcher.launch({ headless: this.headless });
+    let browser: Browser;
+    try {
+      browser = await launcher.launch({ headless: this.headless });
+    } catch (error) {
+      if (!isMissingBrowserError(error)) throw error;
+      throw new Error(
+        `The Playwright ${this.browserEngine} browser is not installed. ` +
+          `Install it with \`${playwrightInstallHint(this.browserEngine)}\`, ` +
+          `or pass \`--browser chromium\` to use the default engine.`,
+        { cause: error }
+      );
+    }
 
     let recordedPath: string;
     try {
