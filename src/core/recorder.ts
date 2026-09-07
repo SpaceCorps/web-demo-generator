@@ -1,33 +1,154 @@
 import { chromium, type Browser, type Page } from 'playwright';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { RecordingOptions } from '../types.js';
+import type { RecordingOptions, TranscodeMode } from '../types.js';
+import { findFfmpeg, shouldTranscode, transcodeToH264 } from './transcode.js';
+
+/** Flag the harness sets on `window` after its first paint. */
+export const HARNESS_READY_FLAG = '__HARNESS_READY__';
+
+export type DemoInteraction =
+  | { kind: 'wait'; ms: number }
+  | { kind: 'click'; selector: string; settleMs?: number }
+  | { kind: 'hover'; selector: string; settleMs?: number }
+  | { kind: 'scrollTo'; selector: string; settleMs?: number };
+
+export interface UrlRecordingOptions extends RecordingOptions {
+  /** Replayed in order once the page signals readiness. */
+  interactions?: DemoInteraction[];
+  /** How long to wait for `window.__HARNESS_READY__` (defaults to 30s). */
+  readyTimeoutMs?: number;
+}
+
+/** Injectable transcoding hooks so the post-processing can be tested without a real ffmpeg. */
+export interface RecorderDeps {
+  findFfmpeg?: typeof findFfmpeg;
+  transcodeToH264?: typeof transcodeToH264;
+}
+
+/** Default settle time after an interaction, long enough for a CSS transition to be on camera. */
+const DEFAULT_SETTLE_MS = 600;
+
+/** Maps the deprecated `codec` field onto a transcode mode. */
+export function resolveTranscodeMode(options: RecordingOptions): TranscodeMode {
+  if (options.transcode) return options.transcode;
+  if (options.codec === 'vp8' || options.codec === 'vp9') return 'off';
+  return 'auto';
+}
+
+function moveFile(from: string, to: string): void {
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  if (fs.existsSync(to)) fs.unlinkSync(to);
+  try {
+    fs.renameSync(from, to);
+  } catch (error) {
+    // Playwright may have written the raw file to another device (e.g. a temp volume).
+    if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+    fs.copyFileSync(from, to);
+    fs.unlinkSync(from);
+  }
+}
+
+/**
+ * Turns the raw recording Playwright produced (always WebM/VP8) into the requested output.
+ *
+ * Renaming is only ever valid when source and target are both `.webm`; anything else is either
+ * transcoded or saved under a truthful `.webm` extension. A WebM payload is never given an `.mp4`
+ * name.
+ */
+export async function finalizeRecording(
+  recordedPath: string,
+  options: RecordingOptions,
+  deps: RecorderDeps = {}
+): Promise<string> {
+  const mode = resolveTranscodeMode(options);
+  const target = path.resolve(options.outputPath);
+
+  if (shouldTranscode(target, mode)) {
+    const transcode = deps.transcodeToH264 ?? transcodeToH264;
+    let finalPath: string;
+    try {
+      finalPath = await transcode(recordedPath, target);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${message}\nThe raw WebM recording was kept at "${recordedPath}".`);
+    }
+    if (fs.existsSync(recordedPath) && path.resolve(recordedPath) !== finalPath) {
+      fs.unlinkSync(recordedPath);
+    }
+    return finalPath;
+  }
+
+  if (path.extname(target).toLowerCase() === '.webm') {
+    moveFile(recordedPath, target);
+    return target;
+  }
+
+  // Not transcoding, so the payload stays WebM — and so must the extension.
+  const webmTarget = path.join(
+    path.dirname(target),
+    `${path.basename(target, path.extname(target))}.webm`
+  );
+  moveFile(recordedPath, webmTarget);
+  return webmTarget;
+}
 
 export class BrowserRecorder {
   private headless: boolean;
+  private deps: RecorderDeps;
 
-  constructor(headless = true) {
+  constructor(headless = true, deps: RecorderDeps = {}) {
     this.headless = headless;
+    this.deps = deps;
   }
 
   /**
-   * Loads an HTML string into a headless Chromium browser and records the animation
-   * using Playwright's built-in video capture (H.264 / WebM / MP4).
+   * Loads an HTML string into a headless Chromium browser and records it.
+   *
+   * The browser records WebM/VP8; an `.mp4` output path is transcoded to real H.264 afterwards.
    */
   async recordHtml(html: string, options: RecordingOptions): Promise<string> {
+    return this.record(options, async (page) => {
+      await page.setContent(html, { waitUntil: 'networkidle' });
+    });
+  }
+
+  /**
+   * Records a URL — typically a `ComponentHarness` page — replaying scripted interactions.
+   *
+   * Waits for `window.__HARNESS_READY__` rather than network idle: a dashboard with running
+   * spinners never reaches network idle.
+   */
+  async recordUrl(url: string, options: UrlRecordingOptions): Promise<string> {
+    return this.record(options, async (page) => {
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(
+        (flag: string) => (window as unknown as Record<string, unknown>)[flag] === true,
+        HARNESS_READY_FLAG,
+        { timeout: options.readyTimeoutMs ?? 30_000 }
+      );
+      await replayInteractions(page, options.interactions ?? []);
+    });
+  }
+
+  /**
+   * Shared recording pipeline: launch, record while `drive` runs, hold for the remaining duration,
+   * then finalize the video file.
+   */
+  private async record(
+    options: RecordingOptions,
+    drive: (page: Page) => Promise<void>
+  ): Promise<string> {
     const width = options.width ?? 1280;
     const height = options.height ?? 720;
     const durationMs = options.durationMs ?? 5000;
 
-    const outputDir = path.dirname(options.outputPath);
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
+    const outputDir = path.dirname(path.resolve(options.outputPath));
+    fs.mkdirSync(outputDir, { recursive: true });
 
-    const browser: Browser = await chromium.launch({
-      headless: this.headless,
-    });
+    const browser: Browser = await chromium.launch({ headless: this.headless });
 
+    let recordedPath: string;
     try {
       const context = await browser.newContext({
         viewport: { width, height },
@@ -38,10 +159,14 @@ export class BrowserRecorder {
       });
 
       const page: Page = await context.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle' });
+      const startedAt = Date.now();
+      await drive(page);
 
-      // Wait for animation duration
-      await page.waitForTimeout(durationMs);
+      // Hold the shot for whatever is left of the requested duration.
+      const remainingMs = durationMs - (Date.now() - startedAt);
+      if (remainingMs > 0) {
+        await page.waitForTimeout(remainingMs);
+      }
 
       // Close page and context to finalize the video recording
       await page.close();
@@ -51,21 +176,55 @@ export class BrowserRecorder {
       if (!video) {
         throw new Error('Video recording failed: No video output found');
       }
-
-      const recordedPath = await video.path();
-      const finalPath = path.resolve(options.outputPath);
-
-      // If recorded file name differs from target output path, rename it
-      if (recordedPath !== finalPath) {
-        if (fs.existsSync(finalPath)) {
-          fs.unlinkSync(finalPath);
-        }
-        fs.renameSync(recordedPath, finalPath);
-      }
-
-      return finalPath;
+      recordedPath = await video.path();
     } finally {
       await browser.close();
     }
+
+    return finalizeRecording(recordedPath, options, this.deps);
   }
 }
+
+async function replayInteractions(page: Page, interactions: DemoInteraction[]): Promise<void> {
+  for (const interaction of interactions) {
+    if (interaction.kind === 'wait') {
+      await page.waitForTimeout(interaction.ms);
+      continue;
+    }
+
+    const locator = page.locator(interaction.selector).first();
+    switch (interaction.kind) {
+      case 'click':
+        await locator.click();
+        break;
+      case 'hover':
+        await locator.hover();
+        break;
+      case 'scrollTo':
+        await locator.scrollIntoViewIfNeeded();
+        break;
+    }
+
+    await page.waitForTimeout(interaction.settleMs ?? DEFAULT_SETTLE_MS);
+  }
+}
+
+/**
+ * Scripted tour of the Tendril dashboard demo, using selectors verified against the component.
+ *
+ * KPI cards are plain `<div>`s with no click handler, so they are hovered and scrolled to rather
+ * than clicked. The Git Activity / Pull Requests tabs only exist because the demo template fills
+ * the dashboard's `TunnelQr` slot.
+ */
+export const TENDRIL_DASHBOARD_SCRIPT: DemoInteraction[] = [
+  { kind: 'wait', ms: 900 },
+  { kind: 'hover', selector: '.tdb-kpi', settleMs: 500 },
+  { kind: 'scrollTo', selector: '.tdb-trend', settleMs: 500 },
+  { kind: 'click', selector: 'button.tdb-tab:has-text("Total Plans")', settleMs: 900 },
+  { kind: 'click', selector: 'button.tdb-tab:has-text("Total Cost")', settleMs: 900 },
+  { kind: 'click', selector: 'button.tdb-tab:has-text("Pull Requests")', settleMs: 900 },
+  { kind: 'click', selector: 'button.tdb-tab:has-text("Git Activity")', settleMs: 900 },
+  { kind: 'hover', selector: 'button.tdb-status-item', settleMs: 500 },
+  { kind: 'scrollTo', selector: '.tdb-factory', settleMs: 900 },
+  { kind: 'hover', selector: 'button.tdb-job-row', settleMs: 700 },
+];
