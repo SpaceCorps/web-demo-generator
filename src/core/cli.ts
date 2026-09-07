@@ -7,6 +7,8 @@ export interface CliOptions {
   prompt?: string;
   outputDir: string;
   format: 'webm' | 'mp4' | 'auto';
+  browser: 'chromium' | 'firefox' | 'webkit';
+  headed: boolean;
   width: number;
   height: number;
   dpi: number;
@@ -29,6 +31,8 @@ export function parseCliArgs(argv: string[]): CliOptions {
       prompt: { type: 'string', short: 'p' },
       'output-dir': { type: 'string', short: 'o', default: './output' },
       format: { type: 'string', short: 'f', default: 'auto' },
+      browser: { type: 'string', short: 'b', default: 'chromium' },
+      headed: { type: 'boolean', default: false },
       viewport: { type: 'string', short: 'v' },
       width: { type: 'string' },
       height: { type: 'string' },
@@ -88,6 +92,17 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
   const json = Boolean(values.json);
   const help = Boolean(values.help);
+  const headed = Boolean(values.headed);
+
+  let browser: 'chromium' | 'firefox' | 'webkit' = 'chromium';
+  const rawBrowser = (getString(values.browser) ?? 'chromium').toLowerCase();
+  if (rawBrowser === 'chrome' || rawBrowser === 'chromium') {
+    browser = 'chromium';
+  } else if (rawBrowser === 'firefox') {
+    browser = 'firefox';
+  } else if (rawBrowser === 'webkit') {
+    browser = 'webkit';
+  }
 
   const extension = format === 'mp4' ? '.mp4' : '.webm';
   const outputPath = path.join(outputDir, `demo${extension}`);
@@ -96,6 +111,8 @@ export function parseCliArgs(argv: string[]): CliOptions {
     prompt,
     outputDir,
     format,
+    browser,
+    headed,
     width,
     height,
     dpi,
@@ -114,6 +131,8 @@ Options:
   -p, --prompt <text>               Natural language description of UI change
   -o, --output-dir <dir>            Output directory (default: ./output)
   -f, --format <format>             Output video format: webm | mp4 | auto (default: auto)
+  -b, --browser <engine>            Browser engine: chromium | firefox | webkit (default: chromium)
+      --headed                      Run browser in headed mode for visual debugging (default: headless)
   -v, --viewport <WxH>              Viewport size, e.g. 1280x720 (default: 1280x720)
       --width <pixels>              Viewport width
       --height <pixels>             Viewport height
@@ -145,9 +164,14 @@ export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number
   }
 
   try {
+    const generatorConfig: DemoGeneratorConfig = {
+      headless: !options.headed,
+      browser: options.browser,
+    };
+
     const generator =
       deps.generator ??
-      (deps.createGenerator ? deps.createGenerator() : new WebDemoGenerator());
+      (deps.createGenerator ? deps.createGenerator(generatorConfig) : new WebDemoGenerator(generatorConfig));
 
     const result: DemoGenerationResult = await generator.generateDemo({
       changeDescription: options.prompt,
