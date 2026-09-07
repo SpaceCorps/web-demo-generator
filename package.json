@@ -8,6 +8,11 @@
   "bin": {
     "web-demo-generator": "dist/bin/cli.js"
   },
+  "files": [
+    "dist",
+    "src/templates",
+    "src/fixtures"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
