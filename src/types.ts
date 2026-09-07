@@ -9,6 +9,16 @@ export interface DemoPromptOptions {
   durationSeconds?: number;
   /** Output video file path (e.g. ./output/demo.mp4) */
   outputPath?: string;
+  /** Viewport width in pixels */
+  width?: number;
+  /** Viewport height in pixels */
+  height?: number;
+  /** Device scale factor for high-DPI capture (defaults to 2) */
+  deviceScaleFactor?: number;
+  /** Video format (webm | mp4 | auto) */
+  format?: 'webm' | 'mp4' | 'auto';
+  /** How to convert the raw WebM recording into the requested output */
+  transcode?: TranscodeMode;
 }
 
 export interface MimicPageResult {
@@ -47,6 +57,21 @@ export interface RecordingOptions {
   outputPath: string;
   /** Recording duration in milliseconds */
   durationMs: number;
+  /** Device scale factor for high-DPI capture (defaults to 2) */
+  deviceScaleFactor?: number;
+}
+
+export interface DemoGenerationResult {
+  /** Output video file path */
+  videoPath: string;
+  /** Animation and demonstration steps */
+  steps: string[];
+  /** Duration in milliseconds of the recording */
+  durationMs: number;
+  /** Execution completion status */
+  status: 'completed' | 'failed';
+  /** Video MIME type */
+  mimeType: 'video/webm' | 'video/mp4';
 }
 
 export interface DemoGeneratorConfig {

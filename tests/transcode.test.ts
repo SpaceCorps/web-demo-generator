@@ -181,8 +181,9 @@ describe('finalizeRecording', () => {
     await expect(
       finalizeRecording(
         recorded,
-        { outputPath: target, durationMs: 1 },
+        { outputPath: target, durationMs: 1, transcode: 'require' },
         {
+          findFfmpeg: async () => null,
           transcodeToH264: async (_input, output) =>
             transcodeToH264(_input, output, { ffmpegPath: null }),
         }
@@ -192,6 +193,25 @@ describe('finalizeRecording', () => {
     // The old behaviour renamed the WebM onto the .mp4 path; that must be gone.
     expect(fs.existsSync(target)).toBe(false);
     expect(fs.existsSync(recorded)).toBe(true);
+  });
+
+  it('gracefully exports WebM when .mp4 is requested but ffmpeg is missing in auto mode', async () => {
+    const dir = makeTempDir();
+    const recorded = path.join(dir, 'raw.webm');
+    fs.writeFileSync(recorded, 'fake-webm');
+    const target = path.join(dir, 'demo.mp4');
+
+    const result = await finalizeRecording(
+      recorded,
+      { outputPath: target, durationMs: 1 },
+      {
+        findFfmpeg: async () => null,
+      }
+    );
+
+    expect(result).toBe(path.join(dir, 'demo.webm'));
+    expect(fs.existsSync(result)).toBe(true);
+    expect(fs.existsSync(target)).toBe(false);
   });
 
   it("keeps a truthful .webm extension when transcoding is 'off'", async () => {
