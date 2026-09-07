@@ -82,6 +82,21 @@ console.log(`Demo steps:`, result.steps);
 
 Always read `result.videoPath` rather than assuming the path you asked for: without ffmpeg the recorder writes a truthfully named `.webm` instead of an `.mp4`.
 
+### CLI Usage
+
+You can also run the generator directly from the command line:
+
+```bash
+# Direct prompt argument
+npx web-demo-generator --prompt "Add dark mode toggle to navigation bar" --format mp4
+
+# Load prompt from a template file
+npx web-demo-generator --prompt-file ./prompts/demo.md
+
+# Pipe prompt from standard input
+cat feature.md | npx web-demo-generator --format mp4
+```
+
 ---
 
 ## 🧩 Component demos

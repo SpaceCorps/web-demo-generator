@@ -1,8 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
+import { Readable } from 'node:stream';
 import { parseCliArgs, runCli } from '../src/core/cli.js';
 import type { WebDemoGenerator } from '../src/index.js';
 
 describe('CLI argument parser', () => {
+  it('parses --prompt-file flag', () => {
+    const opts = parseCliArgs(['--prompt-file', './templates/demo.md']);
+    expect(opts.promptFile).toBe('./templates/demo.md');
+  });
+
   it('parses --prompt and short flag -p', () => {
     const opts1 = parseCliArgs(['--prompt', 'Add dark mode toggle']);
     expect(opts1.prompt).toBe('Add dark mode toggle');
@@ -232,5 +238,186 @@ describe('CLI runner execution', () => {
     const parsed = JSON.parse(stdoutCalls.join(''));
     expect(parsed.status).toBe('failed');
     expect(parsed.error).toContain('Browser launch failed');
+  });
+
+  it('successfully loads prompt from file via injected readFile and passes to generator.generateDemo', async () => {
+    const stdoutCalls: string[] = [];
+    const mockGenerator = {
+      generateDemo: vi.fn().mockResolvedValue({
+        videoPath: 'output/demo.webm',
+        durationMs: 3000,
+        steps: ['Step 1'],
+        status: 'completed',
+        mimeType: 'video/webm',
+      }),
+    } as unknown as WebDemoGenerator;
+
+    const mockReadFile = vi.fn().mockResolvedValue('Prompt content from file template');
+
+    const exitCode = await runCli(['--prompt-file', './prompts/demo.md'], {
+      generator: mockGenerator,
+      readFile: mockReadFile,
+      stdout: (msg) => stdoutCalls.push(msg),
+      stderr: () => {},
+    });
+
+    expect(exitCode).toBe(0);
+    expect(mockReadFile).toHaveBeenCalled();
+    expect(mockGenerator.generateDemo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changeDescription: 'Prompt content from file template',
+      })
+    );
+  });
+
+  it('handles missing prompt file gracefully, printing error and returning exit code 1', async () => {
+    const stderrCalls: string[] = [];
+    const mockReadFile = vi.fn().mockRejectedValue(new Error('ENOENT: no such file or directory'));
+
+    const exitCode = await runCli(['--prompt-file', './missing.md'], {
+      readFile: mockReadFile,
+      stderr: (msg) => stderrCalls.push(msg),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderrCalls.join('')).toContain('Error: Failed to read prompt file "./missing.md"');
+    expect(stderrCalls.join('')).toContain('ENOENT: no such file or directory');
+  });
+
+  it('reads prompt from piped stdin stream when no prompt argument is provided and isTTY is false', async () => {
+    const stdoutCalls: string[] = [];
+    const mockGenerator = {
+      generateDemo: vi.fn().mockResolvedValue({
+        videoPath: 'output/demo.webm',
+        durationMs: 3000,
+        steps: ['Step 1'],
+        status: 'completed',
+        mimeType: 'video/webm',
+      }),
+    } as unknown as WebDemoGenerator;
+
+    const stdinStream = Readable.from(['Prompt streamed via stdin']);
+
+    const exitCode = await runCli([], {
+      generator: mockGenerator,
+      stdin: stdinStream,
+      isTTY: false,
+      stdout: (msg) => stdoutCalls.push(msg),
+      stderr: () => {},
+    });
+
+    expect(exitCode).toBe(0);
+    expect(mockGenerator.generateDemo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changeDescription: 'Prompt streamed via stdin',
+      })
+    );
+  });
+
+  it('reads prompt from stdin when --prompt - or --prompt-file - is passed', async () => {
+    const mockGenerator = {
+      generateDemo: vi.fn().mockResolvedValue({
+        videoPath: 'output/demo.webm',
+        durationMs: 3000,
+        steps: ['Step 1'],
+        status: 'completed',
+        mimeType: 'video/webm',
+      }),
+    } as unknown as WebDemoGenerator;
+
+    const exitCodePrompt = await runCli(['--prompt', '-'], {
+      generator: mockGenerator,
+      stdin: Readable.from(['Prompt from dash prompt']),
+      isTTY: true,
+      stdout: () => {},
+      stderr: () => {},
+    });
+    expect(exitCodePrompt).toBe(0);
+    expect(mockGenerator.generateDemo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changeDescription: 'Prompt from dash prompt',
+      })
+    );
+
+    const exitCodePromptFile = await runCli(['--prompt-file', '-'], {
+      generator: mockGenerator,
+      stdin: Readable.from(['Prompt from dash prompt-file']),
+      stdout: () => {},
+      stderr: () => {},
+    });
+    expect(exitCodePromptFile).toBe(0);
+    expect(mockGenerator.generateDemo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changeDescription: 'Prompt from dash prompt-file',
+      })
+    );
+  });
+
+  it('reads prompt from stdin when positional argument is -', async () => {
+    const mockGenerator = {
+      generateDemo: vi.fn().mockResolvedValue({
+        videoPath: 'output/demo.webm',
+        durationMs: 3000,
+        steps: ['Step 1'],
+        status: 'completed',
+        mimeType: 'video/webm',
+      }),
+    } as unknown as WebDemoGenerator;
+
+    const exitCode = await runCli(['-'], {
+      generator: mockGenerator,
+      stdin: Readable.from(['Prompt from positional dash']),
+      stdout: () => {},
+      stderr: () => {},
+    });
+
+    expect(exitCode).toBe(0);
+    expect(mockGenerator.generateDemo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changeDescription: 'Prompt from positional dash',
+      })
+    );
+  });
+
+  it('rejects empty stdin with clear error message and exit code 1', async () => {
+    const stderrCalls: string[] = [];
+
+    const exitCode = await runCli([], {
+      stdin: Readable.from(['   \n  ']),
+      isTTY: false,
+      stderr: (msg) => stderrCalls.push(msg),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderrCalls.join('')).toContain('Error: Missing required prompt');
+  });
+
+  it('confirms --prompt takes precedence when both --prompt and --prompt-file are provided simultaneously', async () => {
+    const mockGenerator = {
+      generateDemo: vi.fn().mockResolvedValue({
+        videoPath: 'output/demo.webm',
+        durationMs: 3000,
+        steps: ['Step 1'],
+        status: 'completed',
+        mimeType: 'video/webm',
+      }),
+    } as unknown as WebDemoGenerator;
+
+    const mockReadFile = vi.fn().mockResolvedValue('Prompt from file');
+
+    const exitCode = await runCli(['--prompt', 'Inline override prompt', '--prompt-file', './file.md'], {
+      generator: mockGenerator,
+      readFile: mockReadFile,
+      stdout: () => {},
+      stderr: () => {},
+    });
+
+    expect(exitCode).toBe(0);
+    expect(mockReadFile).not.toHaveBeenCalled();
+    expect(mockGenerator.generateDemo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changeDescription: 'Inline override prompt',
+      })
+    );
   });
 });
