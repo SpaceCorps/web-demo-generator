@@ -20,13 +20,29 @@ export interface MimicPageResult {
   suggestedDurationMs: number;
 }
 
+/**
+ * How a raw recording is turned into the requested output file.
+ *
+ * - `auto` (default): transcode to H.264 when the output extension is `.mp4`, otherwise keep the
+ *   raw WebM that the browser produced.
+ * - `require`: always transcode, whatever the extension. Fails when ffmpeg is missing.
+ * - `off`: never transcode. A non-`.webm` output path is saved with a `.webm` extension instead,
+ *   because the payload really is WebM.
+ */
+export type TranscodeMode = 'auto' | 'require' | 'off';
+
 export interface RecordingOptions {
   /** Viewport width in pixels */
   width?: number;
   /** Viewport height in pixels */
   height?: number;
-  /** Output video codec (defaults to h264) */
+  /**
+   * @deprecated The browser only ever records VP8/WebM, so this was never read. Use `transcode`.
+   * Kept as an alias: `vp8`/`vp9` mean `transcode: 'off'`, `h264` means `transcode: 'auto'`.
+   */
   codec?: 'h264' | 'vp8' | 'vp9';
+  /** How to convert the raw WebM recording into the requested output (defaults to `auto`) */
+  transcode?: TranscodeMode;
   /** Path where the video will be saved */
   outputPath: string;
   /** Recording duration in milliseconds */
