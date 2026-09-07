@@ -97,6 +97,8 @@ npx web-demo-generator --prompt-file ./prompts/demo.md
 cat feature.md | npx web-demo-generator --format mp4
 ```
 
+Using `--browser firefox` or `--browser webkit` needs that engine's binary downloaded first: run `npx playwright install firefox` or `npx playwright install webkit` before first use.
+
 ---
 
 ## 🧩 Component demos
