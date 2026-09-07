@@ -169,9 +169,31 @@ export class ComponentHarness {
     const tempDir = this.tempDir;
     this.tempDir = null;
     if (tempDir) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
+      await removeTempDir(tempDir);
     }
   }
+}
+
+/**
+ * Removes the generated entry directory, and keeps removing it until it stays gone.
+ *
+ * Vite's dependency optimizer commits its cache *after* `server.close()` has resolved — measured at
+ * roughly 50 ms — so a single `rmSync` deletes the directory and then watches the optimizer recreate
+ * it as `.vite/deps_temp_<hash>/`. Sweeping until two consecutive checks come back clean leaves
+ * nothing behind in the OS temp directory.
+ */
+async function removeTempDir(dir: string, intervalMs = 100, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let cleanChecks = 0;
+
+  while (cleanChecks < 2 && Date.now() < deadline) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    cleanChecks = fs.existsSync(dir) ? 0 : cleanChecks + 1;
+  }
+
+  // Whatever the optimizer is still holding, this is the last word on the directory.
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 /**

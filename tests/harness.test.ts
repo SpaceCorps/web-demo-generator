@@ -112,4 +112,21 @@ describe.skipIf(!componentsAvailable())('ComponentHarness (integration)', () => 
     await expect(harness.stop()).resolves.toBeUndefined();
     await expect(fetch(url)).rejects.toThrow();
   });
+
+  it('leaves no temp directory behind', async () => {
+    const before = new Set(fs.readdirSync(os.tmpdir()).filter(isHarnessTempDir));
+
+    await harness.start({ template: 'tendril/TendrilDashboardDemo' });
+    const started = fs.readdirSync(os.tmpdir()).filter((e) => isHarnessTempDir(e) && !before.has(e));
+    expect(started).toHaveLength(1);
+
+    await harness.stop();
+
+    // Vite's dep optimizer writes its cache after close() resolves; stop() must outlast that.
+    expect(fs.existsSync(path.join(os.tmpdir(), started[0]!))).toBe(false);
+  });
 });
+
+function isHarnessTempDir(entry: string): boolean {
+  return entry.startsWith('web-demo-harness-');
+}
