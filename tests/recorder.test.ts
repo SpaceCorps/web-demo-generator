@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { chromium } from 'playwright';
+import { chromium, firefox, webkit } from 'playwright';
 import { BrowserRecorder, finalizeRecording, DEMO_COMPLETE_FLAG } from '../src/core/recorder.js';
 
 const tempDirs: string[] = [];
@@ -152,4 +152,63 @@ describe('BrowserRecorder', () => {
     expect(fs.existsSync(result)).toBe(true);
     expect(fs.existsSync(outputPath)).toBe(false);
   });
+
+  it('launches with specified browser engine and headed mode when requested', async () => {
+    const dir = makeTempDir();
+    const recordedVideoPath = path.join(dir, 'fake-raw.webm');
+    fs.writeFileSync(recordedVideoPath, 'fake-video-bytes');
+
+    const firefoxLaunchSpy = vi.spyOn(firefox, 'launch').mockResolvedValue({
+      newContext: vi.fn().mockResolvedValue({
+        newPage: vi.fn().mockResolvedValue({
+          setContent: vi.fn().mockResolvedValue(undefined),
+          waitForFunction: vi.fn().mockResolvedValue(true),
+          waitForTimeout: vi.fn().mockResolvedValue(undefined),
+          close: vi.fn().mockResolvedValue(undefined),
+          video: () => ({ path: async () => recordedVideoPath }),
+        }),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+      close: vi.fn().mockResolvedValue(undefined),
+    } as unknown as import('playwright').Browser);
+
+    const recorder = new BrowserRecorder(false, 'firefox');
+    await recorder.recordHtml('<html><body>Test</body></html>', {
+      outputPath: path.join(dir, 'out.webm'),
+      durationMs: 100,
+    });
+
+    expect(firefoxLaunchSpy).toHaveBeenCalledOnce();
+    expect(firefoxLaunchSpy).toHaveBeenCalledWith({ headless: false });
+  });
+
+  it('launches with webkit engine when requested via options object', async () => {
+    const dir = makeTempDir();
+    const recordedVideoPath = path.join(dir, 'fake-raw.webm');
+    fs.writeFileSync(recordedVideoPath, 'fake-video-bytes');
+
+    const webkitLaunchSpy = vi.spyOn(webkit, 'launch').mockResolvedValue({
+      newContext: vi.fn().mockResolvedValue({
+        newPage: vi.fn().mockResolvedValue({
+          setContent: vi.fn().mockResolvedValue(undefined),
+          waitForFunction: vi.fn().mockResolvedValue(true),
+          waitForTimeout: vi.fn().mockResolvedValue(undefined),
+          close: vi.fn().mockResolvedValue(undefined),
+          video: () => ({ path: async () => recordedVideoPath }),
+        }),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+      close: vi.fn().mockResolvedValue(undefined),
+    } as unknown as import('playwright').Browser);
+
+    const recorder = new BrowserRecorder({ headless: true, browser: 'webkit' });
+    await recorder.recordHtml('<html><body>Test</body></html>', {
+      outputPath: path.join(dir, 'out.webm'),
+      durationMs: 100,
+    });
+
+    expect(webkitLaunchSpy).toHaveBeenCalledOnce();
+    expect(webkitLaunchSpy).toHaveBeenCalledWith({ headless: true });
+  });
 });
+

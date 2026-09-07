@@ -16,6 +16,7 @@ export {
   type DemoInteraction,
   type UrlRecordingOptions,
   type RecorderDeps,
+  type BrowserRecorderOptions,
 } from './core/recorder.js';
 export {
   parseCliArgs,
@@ -72,7 +73,7 @@ export class WebDemoGenerator {
 
   constructor(config?: DemoGeneratorConfig) {
     this.prompting = new PromptingEngine(config?.apiKey, config?.model);
-    this.recorder = new BrowserRecorder(config?.headless ?? true);
+    this.recorder = new BrowserRecorder(config?.headless ?? true, config?.browser ?? 'chromium');
   }
 
   /**

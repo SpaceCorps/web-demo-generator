@@ -74,11 +74,15 @@ export interface DemoGenerationResult {
   mimeType: 'video/webm' | 'video/mp4';
 }
 
+export type BrowserEngine = 'chromium' | 'firefox' | 'webkit';
+
 export interface DemoGeneratorConfig {
   /** Anthropic API Key (defaults to process.env.ANTHROPIC_API_KEY) */
   apiKey?: string;
   /** Model to use for prompting (e.g., claude-3-7-sonnet-20250219) */
   model?: string;
-  /** Headless mode for browser recording */
+  /** Headless mode for browser recording (defaults to true) */
   headless?: boolean;
+  /** Browser engine to use for recording (defaults to 'chromium') */
+  browser?: BrowserEngine;
 }

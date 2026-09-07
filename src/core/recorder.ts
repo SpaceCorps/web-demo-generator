@@ -1,7 +1,7 @@
-import { chromium, type Browser, type Page } from 'playwright';
+import { chromium, firefox, webkit, type Browser, type Page } from 'playwright';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { RecordingOptions, TranscodeMode } from '../types.js';
+import type { RecordingOptions, TranscodeMode, BrowserEngine } from '../types.js';
 import { findFfmpeg, ffmpegInstallHint, shouldTranscode, transcodeToH264 } from './transcode.js';
 
 /** Flag the synthetic page sets on `window` when demo animation completes. */
@@ -113,17 +113,52 @@ export async function finalizeRecording(
   return webmTarget;
 }
 
+export interface BrowserRecorderOptions {
+  headless?: boolean;
+  browser?: BrowserEngine;
+  browserEngine?: BrowserEngine;
+  deps?: RecorderDeps;
+}
+
 export class BrowserRecorder {
   private headless: boolean;
+  private browserEngine: BrowserEngine;
   private deps: RecorderDeps;
 
-  constructor(headless = true, deps: RecorderDeps = {}) {
-    this.headless = headless;
-    this.deps = deps;
+  constructor(
+    headlessOrOptions: boolean | BrowserRecorderOptions = true,
+    browserOrDeps?: BrowserEngine | RecorderDeps,
+    depsOrBrowser?: RecorderDeps | BrowserEngine
+  ) {
+    if (typeof headlessOrOptions === 'object' && headlessOrOptions !== null) {
+      this.headless = headlessOrOptions.headless ?? true;
+      this.browserEngine =
+        headlessOrOptions.browser ?? headlessOrOptions.browserEngine ?? 'chromium';
+      this.deps = headlessOrOptions.deps ?? {};
+    } else {
+      this.headless = headlessOrOptions ?? true;
+      let browser: BrowserEngine = 'chromium';
+      let deps: RecorderDeps = {};
+
+      if (typeof browserOrDeps === 'string') {
+        browser = browserOrDeps;
+        if (typeof depsOrBrowser === 'object' && depsOrBrowser !== null) {
+          deps = depsOrBrowser;
+        }
+      } else if (typeof browserOrDeps === 'object' && browserOrDeps !== null) {
+        deps = browserOrDeps;
+        if (typeof depsOrBrowser === 'string') {
+          browser = depsOrBrowser;
+        }
+      }
+
+      this.browserEngine = browser;
+      this.deps = deps;
+    }
   }
 
   /**
-   * Loads an HTML string into a headless Chromium browser and records it.
+   * Loads an HTML string into a browser and records it.
    *
    * The browser records WebM/VP8; an `.mp4` output path is transcoded to real H.264 afterwards.
    */
@@ -179,7 +214,13 @@ export class BrowserRecorder {
     const outputDir = path.dirname(path.resolve(options.outputPath));
     fs.mkdirSync(outputDir, { recursive: true });
 
-    const browser: Browser = await chromium.launch({ headless: this.headless });
+    const launcher =
+      this.browserEngine === 'firefox'
+        ? firefox
+        : this.browserEngine === 'webkit'
+        ? webkit
+        : chromium;
+    const browser: Browser = await launcher.launch({ headless: this.headless });
 
     let recordedPath: string;
     try {
