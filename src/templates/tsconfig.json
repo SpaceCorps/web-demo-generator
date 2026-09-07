@@ -1,0 +1,17 @@
+{
+  // Templates are browser assets that Vite transforms when the harness starts; they are never part
+  // of the dist/ library build. Their imports resolve through the harness Vite alias, which points
+  // at a components-storybook checkout, so this project only type-checks when that checkout exists.
+  // Run it with `npm run lint:templates` — `npm run lint` deliberately excludes it.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"]
+  },
+  "include": ["**/*"],
+  "exclude": []
+}
