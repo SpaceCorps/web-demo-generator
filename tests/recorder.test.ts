@@ -3,7 +3,13 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { chromium, firefox, webkit } from 'playwright';
-import { BrowserRecorder, finalizeRecording, DEMO_COMPLETE_FLAG } from '../src/core/recorder.js';
+import {
+  BrowserRecorder,
+  finalizeRecording,
+  DEMO_COMPLETE_FLAG,
+  playwrightInstallHint,
+  isMissingBrowserError,
+} from '../src/core/recorder.js';
 
 const tempDirs: string[] = [];
 
@@ -209,6 +215,65 @@ describe('BrowserRecorder', () => {
 
     expect(webkitLaunchSpy).toHaveBeenCalledOnce();
     expect(webkitLaunchSpy).toHaveBeenCalledWith({ headless: true });
+  });
+
+  it('rethrows a missing-browser launch failure with an actionable install hint', async () => {
+    const dir = makeTempDir();
+    vi.spyOn(firefox, 'launch').mockRejectedValue(
+      new Error(
+        "browserType.launch: Executable doesn't exist at /Users/me/Library/Caches/ms-playwright/firefox-1522/firefox/Nightly.app/Contents/MacOS/firefox\n" +
+          '╔═══════════════════════════════════════════════════════════════════════════╗\n' +
+          '║ Looks like Playwright Test or Playwright was just installed or updated.    ║\n' +
+          '║ Please run the following command to download new browsers:                ║\n' +
+          '║     npx playwright install                                                 ║\n' +
+          '╚═══════════════════════════════════════════════════════════════════════════╝'
+      )
+    );
+
+    const recorder = new BrowserRecorder(true, 'firefox');
+    await expect(
+      recorder.recordHtml('<html><body>Test</body></html>', {
+        outputPath: path.join(dir, 'out.webm'),
+        durationMs: 100,
+      })
+    ).rejects.toThrow('npx playwright install firefox');
+  });
+
+  it('rethrows a non-missing-browser launch failure unchanged', async () => {
+    const dir = makeTempDir();
+    vi.spyOn(chromium, 'launch').mockRejectedValue(
+      new Error('Target page, context or browser has been closed')
+    );
+
+    const recorder = new BrowserRecorder(true);
+    await expect(
+      recorder.recordHtml('<html><body>Test</body></html>', {
+        outputPath: path.join(dir, 'out.webm'),
+        durationMs: 100,
+      })
+    ).rejects.toThrow('Target page, context or browser has been closed');
+  });
+});
+
+describe('playwrightInstallHint', () => {
+  it('names the specific engine so the install does not fetch all three', () => {
+    expect(playwrightInstallHint('chromium')).toBe('npx playwright install chromium');
+    expect(playwrightInstallHint('firefox')).toBe('npx playwright install firefox');
+    expect(playwrightInstallHint('webkit')).toBe('npx playwright install webkit');
+  });
+});
+
+describe('isMissingBrowserError', () => {
+  it('recognizes a realistic Playwright missing-executable message', () => {
+    const error = new Error(
+      "browserType.launch: Executable doesn't exist at /Users/me/Library/Caches/ms-playwright/firefox-1522/firefox/Nightly.app/Contents/MacOS/firefox"
+    );
+    expect(isMissingBrowserError(error)).toBe(true);
+  });
+
+  it('does not flag an unrelated launch failure', () => {
+    const error = new Error('Target page, context or browser has been closed');
+    expect(isMissingBrowserError(error)).toBe(false);
   });
 });
 
